@@ -11,6 +11,7 @@ use piggies::model::Vertex;
 use piggies::resource;
 use piggies::texture;
 use wgpu::util::DeviceExt;
+use winit::event::MouseButton;
 use winit::{
     application::ApplicationHandler,
     event::{KeyEvent, WindowEvent},
@@ -133,7 +134,7 @@ impl Instance {
     }
 }
 
-const NUM_INSTANCES_PER_ROW: u32 = 10;
+const NUM_INSTANCES_PER_ROW: u32 = 1;
 const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
     NUM_INSTANCES_PER_ROW as f32 * 0.5,
     0.0,
@@ -141,9 +142,13 @@ const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
 );
 
 struct Camera {
-    eye: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    up: cgmath::Vector3<f32>,
+    position: cgmath::Point3<f32>,
+    // forward: cgmath::Vector3<f32>,
+    // up: cgmath::Vector3<f32>,
+
+    // we do not include roll in the camera rotation for now
+    yaw_angle_deg: cgmath::Deg<f32>,
+    pitch_angle_deg: cgmath::Deg<f32>,
     aspect: f32,
     fovy: f32,
     znear: f32,
@@ -160,9 +165,53 @@ pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_co
 
 impl Camera {
     fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
+        // let view = cgmath::Matrix4::look_at_rh(self.eye, self.eye + self.forward, self.up);
+        // we build the view from the camera's yaw and pitch angles
+        // // use cgmath::Matrix4::from_angle_x, from_angle_y, from_angle_z
+        let view = cgmath::Matrix4::look_at_rh(
+            self.position,
+            self.position + self.forward(),
+            cgmath::Vector3::new(0.0, 1.0, 0.0),
+        );
+
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
         OPENGL_TO_WGPU_MATRIX * proj * view
+    }
+
+    fn forward(&self) -> cgmath::Vector3<f32> {
+        // consider the pitch and yaw angles to compute the forward direction
+        let initial_forward = cgmath::Vector4::new(0.0, 0.0, -1.0, 0.0);
+        let forward = cgmath::Matrix4::from_angle_x(self.pitch_angle_deg) * initial_forward;
+        let forward = cgmath::Matrix4::from_angle_y(self.yaw_angle_deg) * forward;
+        cgmath::Vector3::new(forward.x, forward.y, forward.z)
+    }
+
+    fn move_forward(&mut self, delta: f32) {
+        self.position += self.forward() * delta;
+    }
+
+    fn move_backward(&mut self, delta: f32) {
+        self.position -= self.forward() * delta;
+    }
+
+    fn move_left(&mut self, delta: f32) {
+        self.position -= self.right() * delta;
+    }
+
+    fn move_right(&mut self, delta: f32) {
+        self.position += self.right() * delta;
+    }
+
+    fn move_up(&mut self, delta: f32) {
+        // should be perpendicular to the forward direction
+        // right cross forward
+        let up = self.right().cross(self.forward());
+        self.position += up * delta;
+    }
+
+    fn right(&self) -> cgmath::Vector3<f32> {
+        let up = cgmath::Vector3::new(0.0, 1.0, 0.0);
+        self.forward().cross(up)
     }
 }
 
@@ -205,6 +254,19 @@ pub struct State {
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
     obj_model: model::Model,
+    prev_time: std::time::Instant,
+    w_is_down: bool,
+    a_is_down: bool,
+    s_is_down: bool,
+    d_is_down: bool,
+    q_is_down: bool,
+    e_is_down: bool,
+    mouse_left_down: bool,
+    mouse_right_down: bool,
+    prev_mouse_x: f32,
+    prev_mouse_y: f32,
+    mouse_x_delta: f32,
+    mouse_y_delta: f32,
 }
 
 impl State {
@@ -298,9 +360,9 @@ impl State {
         });
 
         let camera = Camera {
-            eye: (0.0, 2.5, 5.0).into(),
-            target: (0.0, 0.0, 0.0).into(),
-            up: (0.0, 1.0, 0.0).into(),
+            position: (0.0, 0.0, 5.0).into(),
+            yaw_angle_deg: cgmath::Deg(0.0),
+            pitch_angle_deg: cgmath::Deg(0.0),
             aspect: config.width as f32 / config.height as f32,
             fovy: 45.0,
             znear: 0.1,
@@ -406,8 +468,8 @@ impl State {
         let instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
-                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let x = SPACE_BETWEEN * (x as f32 - (NUM_INSTANCES_PER_ROW - 1) as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - (NUM_INSTANCES_PER_ROW - 1) as f32 / 2.0);
 
                     let position = cgmath::Vector3 { x, y: 0.0, z };
 
@@ -433,6 +495,7 @@ impl State {
         });
         let obj_model =
             resource::load_model("cube.obj", &device, &queue, &texture_bind_group_layout).unwrap();
+        let prev_time = std::time::Instant::now();
         Ok(Self {
             surface,
             device,
@@ -451,6 +514,19 @@ impl State {
             instances,
             depth_texture,
             obj_model,
+            prev_time,
+            w_is_down: false,
+            a_is_down: false,
+            s_is_down: false,
+            d_is_down: false,
+            q_is_down: false,
+            e_is_down: false,
+            mouse_left_down: false,
+            mouse_right_down: false,
+            prev_mouse_x: 0.0,
+            prev_mouse_y: 0.0,
+            mouse_x_delta: 0.0,
+            mouse_y_delta: 0.0,
         })
     }
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -462,6 +538,45 @@ impl State {
             self.depth_texture =
                 texture::Texture::create_depth_texture(&self.device, &self.config, "depth texture");
         }
+    }
+    pub fn update(&mut self) -> anyhow::Result<()> {
+        let now = std::time::Instant::now();
+        let delta_time = (now - self.prev_time).as_secs_f32();
+        self.prev_time = now;
+        let speed = 1.0;
+        if self.mouse_right_down {
+            // handle movement
+            if self.w_is_down {
+                self.camera.move_forward(speed * delta_time)
+            }
+            if self.s_is_down {
+                self.camera.move_forward(-speed * delta_time)
+            }
+            if self.a_is_down {
+                self.camera.move_right(-speed * delta_time)
+            }
+            if self.d_is_down {
+                self.camera.move_right(speed * delta_time)
+            }
+            if self.q_is_down {
+                self.camera.move_up(-speed * delta_time)
+            }
+            if self.e_is_down {
+                self.camera.move_up(speed * delta_time)
+            }
+            // handle mouse movement
+            let x_delta = self.mouse_x_delta;
+            let y_delta = self.mouse_y_delta;
+            self.mouse_x_delta = 0.0;
+            self.mouse_y_delta = 0.0;
+            let yaw_rotation_speed = -0.1;
+            let pitch_rotation_speed = -0.1;
+            // let yaw_rotation_angle = yaw_rotation_speed * x_delta;
+            // let pitch_rotation_angle = pitch_rotation_speed * y_delta;
+            self.camera.yaw_angle_deg += cgmath::Deg(x_delta * yaw_rotation_speed);
+            self.camera.pitch_angle_deg += cgmath::Deg(y_delta * pitch_rotation_speed);
+        }
+        Ok(())
     }
     pub fn render(&mut self) -> anyhow::Result<()> {
         self.window.request_redraw();
@@ -494,6 +609,12 @@ impl State {
                 label: Some("Render Encoder"),
             });
         {
+            self.camera_uniform.update_view_proj(&self.camera);
+            self.queue.write_buffer(
+                &self.camera_buffer,
+                0,
+                bytemuck::cast_slice(&[self.camera_uniform]),
+            );
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -534,11 +655,53 @@ impl State {
         self.queue.present(output);
         Ok(())
     }
-    fn handle_key(&self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
-        match (code, is_pressed) {
-            (KeyCode::Escape, true) => event_loop.exit(),
+    fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
+        // match (code, is_pressed) {
+        //     (KeyCode::Escape, true) => event_loop.exit(),
+        //     (KeyCode::KeyW, true) => {
+        //         self.w_is_down = true;
+        //     }
+
+        //     _ => {}
+        // }
+        match code {
+            KeyCode::Escape => event_loop.exit(),
+            KeyCode::KeyW => self.w_is_down = is_pressed,
+            KeyCode::KeyA => self.a_is_down = is_pressed,
+            KeyCode::KeyS => self.s_is_down = is_pressed,
+            KeyCode::KeyD => self.d_is_down = is_pressed,
+            KeyCode::KeyQ => self.q_is_down = is_pressed,
+            KeyCode::KeyE => self.e_is_down = is_pressed,
             _ => {}
         }
+    }
+    fn handle_mouse_input(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        code: MouseButton,
+        is_pressed: bool,
+    ) {
+        match code {
+            MouseButton::Left => {
+                self.mouse_left_down = is_pressed;
+                println!("Mouse {}", if is_pressed { "down" } else { "up" })
+            }
+            MouseButton::Right => {
+                self.mouse_right_down = is_pressed;
+                println!("Mouse {}", if is_pressed { "down" } else { "up" })
+            }
+            _ => {}
+        }
+    }
+    fn handle_mouse_move(&mut self, event_loop: &ActiveEventLoop, x: f32, y: f32) {
+        self.mouse_x_delta = x - self.prev_mouse_x;
+        self.mouse_y_delta = y - self.prev_mouse_y;
+        self.prev_mouse_x = x;
+        self.prev_mouse_y = y;
+        println!(
+            "Mouse move: ({}, {}), delta: ({}, {})",
+            x, y, self.mouse_x_delta, self.mouse_y_delta
+        );
     }
 }
 
@@ -576,15 +739,11 @@ impl ApplicationHandler<State> for App {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
                 state.camera.aspect = size.width as f32 / size.height as f32;
-                state.camera_uniform.update_view_proj(&state.camera);
-                state.queue.write_buffer(
-                    &state.camera_buffer,
-                    0,
-                    bytemuck::cast_slice(&[state.camera_uniform]),
-                );
+
                 state.resize(size.width, size.height);
             }
             WindowEvent::RedrawRequested => {
+                state.update().unwrap();
                 state.render().unwrap();
             }
             WindowEvent::KeyboardInput {
@@ -597,6 +756,19 @@ impl ApplicationHandler<State> for App {
                 ..
             } => {
                 state.handle_key(event_loop, code, key_state.is_pressed());
+            }
+            WindowEvent::MouseInput {
+                button,
+                state: mouse_state,
+                ..
+            } => {
+                state.handle_mouse_input(event_loop, button, mouse_state.is_pressed());
+            }
+            WindowEvent::CursorMoved {
+                device_id: _,
+                position,
+            } => {
+                state.handle_mouse_move(event_loop, position.x as f32, position.y as f32);
             }
             _ => {}
         }
