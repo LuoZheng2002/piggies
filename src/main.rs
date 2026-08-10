@@ -11,9 +11,11 @@ use piggies::instance::Instance;
 use piggies::model;
 use piggies::model::DrawModel;
 use piggies::resource;
+use piggies::skybox_pipeline::create_skybox_pipeline;
 use piggies::texture;
 use piggies::unlit_pipeline::create_unlit_pipeline;
 use wgpu::util::DeviceExt;
+use wgpu::wgc::binding_model::BindGroupDescriptor;
 use winit::event::MouseButton;
 use winit::{
     application::ApplicationHandler,
@@ -101,6 +103,8 @@ pub struct State {
     camera_view_proj_state: camera::CameraRenderState,
     camera_inv_view_proj_state: camera::CameraRenderState,
     unlit_pipeline: wgpu::RenderPipeline,
+    skybox_pipeline: wgpu::RenderPipeline,
+    skybox_texture_bind_group: wgpu::BindGroup,
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
     depth_texture: texture::Texture,
@@ -221,6 +225,51 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
         let unlit_pipeline = create_unlit_pipeline(&device, &config);
+        let skybox_pipeline = create_skybox_pipeline(&device, &config);
+        let skybox_texture_bindgroup_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::Cube,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("texture_bind_group_layout"),
+            });
+        let face_size = 512; // to do: not hardcode the value
+        let skybox_texture = texture::Texture::create_skybox_texture(
+            &device,
+            &queue,
+            "skybox_texture",
+            "res/skybox_cubemap",
+            face_size,
+        );
+        let skybox_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &skybox_texture_bindgroup_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&skybox_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&skybox_texture.sampler),
+                },
+            ],
+            label: Some("skybox_texture_bind_group"),
+        });
         let obj_model = resource::load_model_unlit("cube.obj", &device, &queue).unwrap();
         let prev_time = std::time::Instant::now();
         Ok(Self {
@@ -234,6 +283,8 @@ impl State {
             camera_view_proj_state,
             camera_inv_view_proj_state,
             unlit_pipeline,
+            skybox_pipeline,
+            skybox_texture_bind_group,
             instance_buffer,
             instances,
             depth_texture,
@@ -373,6 +424,10 @@ impl State {
                 0..self.instances.len() as u32,
                 &self.camera_view_proj_state.camera_bind_group,
             );
+            render_pass.set_pipeline(&self.skybox_pipeline);
+            render_pass.set_bind_group(0, &self.skybox_texture_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.camera_inv_view_proj_state.camera_bind_group, &[]);
+            render_pass.draw(0..3, 0..1);
         }
         self.queue.submit(std::iter::once(encoder.finish()));
         self.queue.present(output);

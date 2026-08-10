@@ -43,7 +43,7 @@ pub fn create_unlit_pipeline(
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
     });
     let unlit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Render Pipeline Layout"),
+        label: Some("Unlit Pipeline Layout"),
         bind_group_layouts: &[
             Some(&unlit_texture_bind_group_layout),
             Some(&camera::CameraRenderState::camera_bind_group_layout(device)),
