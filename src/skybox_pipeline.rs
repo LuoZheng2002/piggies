@@ -1,9 +1,4 @@
-use crate::{
-    camera,
-    instance::InstanceRaw,
-    model::{self, Vertex},
-    texture,
-};
+use crate::{camera, texture};
 
 pub fn create_skybox_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     let unlit_texture_bind_group_layout =
@@ -34,9 +29,8 @@ pub fn create_skybox_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bi
 pub fn create_skybox_pipeline(
     device: &wgpu::Device,
     config: &wgpu::SurfaceConfiguration,
+    skybox_texture_bind_group_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
-    let skybox_texture_bind_group_layout = create_skybox_texture_bindgroup_layout(device);
-
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("skybox_shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("skybox.wgsl").into()),
@@ -44,7 +38,7 @@ pub fn create_skybox_pipeline(
     let skybox_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Skybox Pipeline Layout"),
         bind_group_layouts: &[
-            Some(&skybox_texture_bind_group_layout),
+            Some(skybox_texture_bind_group_layout),
             Some(&camera::CameraRenderState::camera_bind_group_layout(device)),
         ],
         immediate_size: 0,
@@ -81,7 +75,7 @@ pub fn create_skybox_pipeline(
         depth_stencil: Some(wgpu::DepthStencilState {
             format: texture::Texture::DEPTH_FORMAT,
             depth_write_enabled: Some(false),
-            depth_compare: Some(wgpu::CompareFunction::Less),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),

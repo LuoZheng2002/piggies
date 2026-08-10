@@ -1,8 +1,7 @@
 use std::{path::PathBuf, str::FromStr};
 
 use anyhow::*;
-use image::{GenericImageView, RgbaImage};
-use wgpu::Extent3d;
+use image::GenericImageView;
 
 pub struct Texture {
     #[allow(unused)]

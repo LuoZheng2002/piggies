@@ -11,11 +11,10 @@ use piggies::instance::Instance;
 use piggies::model;
 use piggies::model::DrawModel;
 use piggies::resource;
-use piggies::skybox_pipeline::create_skybox_pipeline;
+use piggies::skybox_pipeline::{create_skybox_pipeline, create_skybox_texture_bindgroup_layout};
 use piggies::texture;
 use piggies::unlit_pipeline::create_unlit_pipeline;
 use wgpu::util::DeviceExt;
-use wgpu::wgc::binding_model::BindGroupDescriptor;
 use winit::event::MouseButton;
 use winit::{
     application::ApplicationHandler,
@@ -151,7 +150,7 @@ impl State {
             trace: wgpu::Trace::Off,
         });
         let (device, queue) = pollster::block_on(device_and_queue)?;
-        let surface_caps = surface.get_capabilities((&adapter));
+        let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
             .formats
             .iter()
@@ -225,29 +224,9 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
         let unlit_pipeline = create_unlit_pipeline(&device, &config);
-        let skybox_pipeline = create_skybox_pipeline(&device, &config);
-        let skybox_texture_bindgroup_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::Cube,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-                label: Some("texture_bind_group_layout"),
-            });
+        let skybox_texture_bindgroup_layout = create_skybox_texture_bindgroup_layout(&device);
+        let skybox_pipeline =
+            create_skybox_pipeline(&device, &config, &skybox_texture_bindgroup_layout);
         let face_size = 512; // to do: not hardcode the value
         let skybox_texture = texture::Texture::create_skybox_texture(
             &device,
@@ -308,6 +287,7 @@ impl State {
         if width > 0 && height > 0 {
             self.config.width = width;
             self.config.height = height;
+            self.camera.aspect = width as f32 / height as f32;
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
             self.depth_texture =
