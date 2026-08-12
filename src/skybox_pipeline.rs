@@ -1,9 +1,10 @@
 use crate::{camera, texture};
 
-pub fn create_skybox_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    let unlit_texture_bind_group_layout =
+pub fn create_skybox_texture_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    let skybox_texture_bind_group_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[
+                // cube texture
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -14,6 +15,7 @@ pub fn create_skybox_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bi
                     },
                     count: None,
                 },
+                // texture sampler
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
@@ -23,14 +25,15 @@ pub fn create_skybox_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bi
             ],
             label: Some("texture_bind_group_layout"),
         });
-    unlit_texture_bind_group_layout
+    skybox_texture_bind_group_layout
 }
 
 pub fn create_skybox_pipeline(
     device: &wgpu::Device,
     config: &wgpu::SurfaceConfiguration,
-    skybox_texture_bind_group_layout: &wgpu::BindGroupLayout,
+    // skybox_texture_bind_group_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
+    let skybox_texture_bind_group_layout = &create_skybox_texture_bind_group_layout(device);
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("skybox_shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("skybox.wgsl").into()),

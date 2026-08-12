@@ -36,14 +36,14 @@ pub fn load_texture(
     texture::Texture::from_bytes(device, queue, &data, file_name)
 }
 
-pub fn load_model_unlit(
+pub fn load_model(
     file_name: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     // layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<model::Model> {
-    let unlit_texture_bind_group_layout =
-        unlit_pipeline::create_unlit_texture_bindgroup_layout(device);
+    let unlit_material_bind_group_layout =
+        unlit_pipeline::create_unlit_material_bind_group_layout(device);
 
     let obj_text = load_string(file_name)?;
     let obj_cursor = Cursor::new(obj_text);
@@ -70,7 +70,7 @@ pub fn load_model_unlit(
             queue,
         )?;
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &unlit_texture_bind_group_layout,
+            layout: &unlit_material_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,

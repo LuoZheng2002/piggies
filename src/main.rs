@@ -8,10 +8,14 @@ use cgmath::Zero;
 use piggies::camera;
 use piggies::camera::Camera;
 use piggies::instance::Instance;
+use piggies::light::LightRenderState;
+use piggies::light::Lights;
+use piggies::light::SingleLight;
 use piggies::model;
-use piggies::model::DrawModel;
+use piggies::pbr_pipeline::DrawModelPbr;
+use piggies::pbr_pipeline::create_pbr_pipeline;
 use piggies::resource;
-use piggies::skybox_pipeline::{create_skybox_pipeline, create_skybox_texture_bindgroup_layout};
+use piggies::skybox_pipeline::{create_skybox_pipeline, create_skybox_texture_bind_group_layout};
 use piggies::texture;
 use piggies::unlit_pipeline::create_unlit_pipeline;
 use wgpu::util::DeviceExt;
@@ -101,7 +105,10 @@ pub struct State {
     // camera_bind_group: wgpu::BindGroup,
     camera_view_proj_state: camera::CameraRenderState,
     camera_inv_view_proj_state: camera::CameraRenderState,
+    lights: Lights,
+    light_render_state: LightRenderState,
     unlit_pipeline: wgpu::RenderPipeline,
+    pbr_pipeline: wgpu::RenderPipeline,
     skybox_pipeline: wgpu::RenderPipeline,
     skybox_texture_bind_group: wgpu::BindGroup,
     instances: Vec<Instance>,
@@ -190,6 +197,15 @@ impl State {
             &queue,
             camera::CameraUniformType::InverseViewProjNoTranslation,
         );
+        let light = SingleLight::Point {
+            position: cgmath::Point3 {
+                x: 3.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+        let lights = Lights(vec![light]);
+        let light_render_state = LightRenderState::new(&lights, &device, &queue);
         let depth_texture =
             texture::Texture::create_depth_texture(&device, &config, "depth texture");
 
@@ -224,19 +240,16 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
         let unlit_pipeline = create_unlit_pipeline(&device, &config);
-        let skybox_texture_bindgroup_layout = create_skybox_texture_bindgroup_layout(&device);
-        let skybox_pipeline =
-            create_skybox_pipeline(&device, &config, &skybox_texture_bindgroup_layout);
-        let face_size = 512; // to do: not hardcode the value
+        let pbr_pipeline = create_pbr_pipeline(&device, &config);
+        let skybox_pipeline = create_skybox_pipeline(&device, &config);
         let skybox_texture = texture::Texture::create_skybox_texture(
             &device,
             &queue,
             "skybox_texture",
             "res/skybox_cubemap",
-            face_size,
         );
         let skybox_texture_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &skybox_texture_bindgroup_layout,
+            layout: &create_skybox_texture_bind_group_layout(&device),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -249,7 +262,7 @@ impl State {
             ],
             label: Some("skybox_texture_bind_group"),
         });
-        let obj_model = resource::load_model_unlit("cube.obj", &device, &queue).unwrap();
+        let obj_model = resource::load_model("cube.obj", &device, &queue).unwrap();
         let prev_time = std::time::Instant::now();
         Ok(Self {
             surface,
@@ -261,7 +274,10 @@ impl State {
             camera,
             camera_view_proj_state,
             camera_inv_view_proj_state,
+            lights,
+            light_render_state,
             unlit_pipeline,
+            pbr_pipeline,
             skybox_pipeline,
             skybox_texture_bind_group,
             instance_buffer,
@@ -340,6 +356,8 @@ impl State {
             .sync_camera_state(&self.camera, &self.queue);
         self.camera_inv_view_proj_state
             .sync_camera_state(&self.camera, &self.queue);
+        self.light_render_state
+            .sync_lights(&self.lights, &self.queue);
 
         if !self.is_surface_configured {
             return Ok(());
@@ -398,11 +416,18 @@ impl State {
                 multiview_mask: None,
             });
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_pipeline(&self.unlit_pipeline);
-            render_pass.draw_model_instanced(
+            // render_pass.set_pipeline(&self.unlit_pipeline);
+            render_pass.set_pipeline(&self.pbr_pipeline);
+            // render_pass.draw_model_unlit_instanced(
+            //     &self.obj_model,
+            //     0..self.instances.len() as u32,
+            //     &self.camera_view_proj_state.camera_bind_group,
+            // );
+            render_pass.draw_model_pbr_instanced(
                 &self.obj_model,
                 0..self.instances.len() as u32,
                 &self.camera_view_proj_state.camera_bind_group,
+                &self.light_render_state.light_bind_group,
             );
             render_pass.set_pipeline(&self.skybox_pipeline);
             render_pass.set_bind_group(0, &self.skybox_texture_bind_group, &[]);
@@ -414,14 +439,6 @@ impl State {
         Ok(())
     }
     fn handle_key(&mut self, event_loop: &ActiveEventLoop, code: KeyCode, is_pressed: bool) {
-        // match (code, is_pressed) {
-        //     (KeyCode::Escape, true) => event_loop.exit(),
-        //     (KeyCode::KeyW, true) => {
-        //         self.w_is_down = true;
-        //     }
-
-        //     _ => {}
-        // }
         match code {
             KeyCode::Escape => event_loop.exit(),
             KeyCode::KeyW => self.w_is_down = is_pressed,

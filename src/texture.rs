@@ -132,7 +132,6 @@ impl Texture {
         queue: &wgpu::Queue,
         label: &str,
         skybox_texture_folder: &str,
-        face_size: u32,
     ) -> Self {
         let file_names = [
             "0_pos_x.png",
@@ -158,6 +157,7 @@ impl Texture {
                 img.to_rgba8()
             })
             .collect::<Vec<_>>();
+        let face_size = skybox_images[0].width();
         let size = wgpu::Extent3d {
             width: face_size,
             height: face_size,

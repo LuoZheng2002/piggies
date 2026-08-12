@@ -77,6 +77,7 @@ impl Camera {
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CameraUniform {
+    view_pos: [f32; 4],
     transform: [[f32; 4]; 4],
 }
 
@@ -84,17 +85,11 @@ impl CameraUniform {
     pub fn new() -> Self {
         use cgmath::SquareMatrix;
         Self {
+            view_pos: [0.0; 4],
             transform: cgmath::Matrix4::identity().into(),
         }
     }
-
-    // pub fn update(&mut self, camera_uniform_type camera: &Camera) {
-    //     match self.camera_uniform_type {
-    //         CameraUniformType::ViewProjection => self.view_proj = camera.build_view_projection_matrix().into(),
-    //         CameraUniformType::InverseViewProjNoTranslation => self.view_proj = camera.build_inverse_view_proj_no_translation_matrix().into(),
-    //     }
-    // }
-    pub fn update_view_proj(&mut self, camera: &Camera) {
+    pub fn view_proj_from_camera(camera: &Camera) -> CameraUniform {
         let view = cgmath::Matrix4::look_at_rh(
             camera.position,
             camera.position + camera.forward(),
@@ -107,9 +102,12 @@ impl CameraUniform {
             camera.znear,
             camera.zfar,
         );
-        self.transform = (OPENGL_TO_WGPU_MATRIX * proj * view).into();
+        CameraUniform {
+            view_pos: camera.position.to_homogeneous().into(),
+            transform: (OPENGL_TO_WGPU_MATRIX * proj * view).into(),
+        }
     }
-    pub fn update_inverse_view_proj_no_translation(&mut self, camera: &Camera) {
+    pub fn inverse_view_proj_no_translation_from_camera(camera: &Camera) -> Self {
         use cgmath::SquareMatrix;
 
         let origin = cgmath::Point3::new(0.0, 0.0, 0.0);
@@ -125,10 +123,13 @@ impl CameraUniform {
             camera.znear,
             camera.zfar,
         );
-        self.transform = (OPENGL_TO_WGPU_MATRIX * proj * view)
-            .invert()
-            .expect("view-projection matrix should be invertible")
-            .into();
+        Self {
+            view_pos: camera.position.to_homogeneous().into(),
+            transform: (OPENGL_TO_WGPU_MATRIX * proj * view)
+                .invert()
+                .expect("view-projection matrix should be invertible")
+                .into(),
+        }
     }
 }
 
@@ -176,11 +177,11 @@ impl CameraRenderState {
     pub fn sync_camera_state(&mut self, camera: &Camera, queue: &wgpu::Queue) {
         match self.camera_uniform_type {
             CameraUniformType::ViewProjection => {
-                self.camera_uniform.update_view_proj(camera);
+                self.camera_uniform = CameraUniform::view_proj_from_camera(camera);
             }
             CameraUniformType::InverseViewProjNoTranslation => {
-                self.camera_uniform
-                    .update_inverse_view_proj_no_translation(camera);
+                self.camera_uniform =
+                    CameraUniform::inverse_view_proj_no_translation_from_camera(camera);
             }
         }
         queue.write_buffer(

@@ -1,12 +1,14 @@
 use crate::{
     camera,
     instance::InstanceRaw,
-    model::{self, Vertex},
+    model::{self, Material, Mesh, Model, Vertex},
     texture,
 };
 
-pub fn create_unlit_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    let unlit_texture_bind_group_layout =
+use std::ops::Range;
+
+pub fn create_unlit_material_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    let unlit_material_bind_group_layout =
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -26,9 +28,9 @@ pub fn create_unlit_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bin
                     count: None,
                 },
             ],
-            label: Some("texture_bind_group_layout"),
+            label: Some("unlit_material_bind_group_layout"),
         });
-    unlit_texture_bind_group_layout
+    unlit_material_bind_group_layout
 }
 
 pub fn create_unlit_pipeline(
@@ -36,16 +38,16 @@ pub fn create_unlit_pipeline(
     config: &wgpu::SurfaceConfiguration,
     // layout: &wgpu::PipelineLayout,
 ) -> wgpu::RenderPipeline {
-    let unlit_texture_bind_group_layout = create_unlit_texture_bindgroup_layout(device);
+    let unlit_material_bind_group_layout = create_unlit_material_bind_group_layout(device);
 
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Shader"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(include_str!("unlit.wgsl").into()),
     });
     let unlit_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("Unlit Pipeline Layout"),
         bind_group_layouts: &[
-            Some(&unlit_texture_bind_group_layout),
+            Some(&unlit_material_bind_group_layout),
             Some(&camera::CameraRenderState::camera_bind_group_layout(device)),
         ],
         immediate_size: 0,
@@ -95,4 +97,70 @@ pub fn create_unlit_pipeline(
         cache: None,
     });
     unlit_pipeline
+}
+
+pub trait DrawModelUnlit<'a> {
+    fn draw_mesh_unlit(
+        &mut self,
+        mesh: &'a Mesh,
+        material: &'a Material,
+        camera_bind_group: &'a wgpu::BindGroup,
+    );
+    fn draw_mesh_unlit_instanced(
+        &mut self,
+        mesh: &'a Mesh,
+        material: &'a Material,
+        instances: Range<u32>,
+        camera_bind_group: &'a wgpu::BindGroup,
+    );
+    fn draw_model_unlit(&mut self, model: &'a Model, camera_bind_group: &'a wgpu::BindGroup);
+    fn draw_model_unlit_instanced(
+        &mut self,
+        model: &'a Model,
+        instances: Range<u32>,
+        camera_bind_group: &'a wgpu::BindGroup,
+    );
+}
+
+impl<'a, 'b> DrawModelUnlit<'b> for wgpu::RenderPass<'a>
+where
+    'b: 'a,
+{
+    fn draw_mesh_unlit(
+        &mut self,
+        mesh: &'b Mesh,
+        material: &'b Material,
+        camera_bind_group: &'b wgpu::BindGroup,
+    ) {
+        self.draw_mesh_unlit_instanced(mesh, material, 0..1, camera_bind_group);
+    }
+    fn draw_mesh_unlit_instanced(
+        &mut self,
+        mesh: &'b Mesh,
+        material: &'b Material,
+        instances: Range<u32>,
+        camera_bind_group: &'b wgpu::BindGroup,
+    ) {
+        self.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+        self.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        self.set_bind_group(0, &material.bind_group, &[]);
+        self.set_bind_group(1, camera_bind_group, &[]);
+        self.draw_indexed(0..mesh.num_elements, 0, instances);
+    }
+
+    fn draw_model_unlit(&mut self, model: &'b Model, camera_bind_group: &'b wgpu::BindGroup) {
+        self.draw_model_unlit_instanced(model, 0..1, camera_bind_group);
+    }
+
+    fn draw_model_unlit_instanced(
+        &mut self,
+        model: &'b Model,
+        instances: Range<u32>,
+        camera_bind_group: &'b wgpu::BindGroup,
+    ) {
+        for mesh in &model.meshes {
+            let material = &model.materials[mesh.material];
+            self.draw_mesh_unlit_instanced(mesh, material, instances.clone(), camera_bind_group);
+        }
+    }
 }

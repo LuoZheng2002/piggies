@@ -1,6 +1,8 @@
 pub mod camera;
 pub mod instance;
+pub mod light;
 pub mod model;
+pub mod pbr_pipeline;
 pub mod resource;
 pub mod skybox_pipeline;
 pub mod texture;

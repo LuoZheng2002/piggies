@@ -1,9 +1,8 @@
 
 struct CameraUniform {
+    view_pos: vec4<f32>, // not used
     sky_inverse_view_proj: mat4x4<f32>, // no translation
 }
-
-
 
 @group(0) @binding(0)
 var sky_texture: texture_cube<f32>;
@@ -35,7 +34,6 @@ fn vs_main(
     let clip_position = vec4<f32>(positions[vertex_index], 1.0, 1.0);
     output.clip_position = clip_position;
     output.direction = (camera_uniform.sky_inverse_view_proj * clip_position).xyz;
-
     return output;
 }
 
